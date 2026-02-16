@@ -74,11 +74,18 @@ if( STANDALONE_ROL )
   add_library(Teuchos_CompObject OBJECT ${SRC}/compatibility/teuchos-lite/Teuchos_CompObject.cpp)
   add_library(Teuchos_TestForException OBJECT ${SRC}/compatibility/teuchos-lite/Teuchos_TestForException.cpp)
 
+  target_sources(rol PRIVATE
+    $<TARGET_OBJECTS:Teuchos_BLAS>
+    $<TARGET_OBJECTS:Teuchos_CompObject>
+    $<TARGET_OBJECTS:Teuchos_TestForException>
+  )
+
   # Use GLOB_RECURSE to find all directories in core components
   set(ROL_CORE_DIRS ${SRC}/algorithm
                     ${SRC}/elementwise
                     ${SRC}/function
                     ${SRC}/oed
+                    ${SRC}/mol
                     ${SRC}/sol
                     ${SRC}/status
                     ${SRC}/step
@@ -97,15 +104,45 @@ if( STANDALONE_ROL )
     endforeach()
   endforeach()
 
-  target_include_directories(rol PUBLIC ${CMAKE_CURRENT_BINARY_DIR}
-                                        ${ROL_COMPATIBILITY_INCLUDES}
-                                        ${ROL_CORE_INCLUDES})
+  target_include_directories(rol
+    PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+      $<BUILD_INTERFACE:${ROL_COMPATIBILITY_INCLUDES}>
+      $<BUILD_INTERFACE:${ROL_CORE_INCLUDES}>
+      $<INSTALL_INTERFACE:include>   # consumers will do -I<prefix>/include
+  )
 
-  target_link_libraries(rol PUBLIC ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES}
-                                    pugixml
-                                    Teuchos_BLAS Teuchos_CompObject Teuchos_TestForException)
+  target_link_libraries(rol PUBLIC BLAS::BLAS LAPACK::LAPACK pugixml)
 
   add_library(rol::rol ALIAS rol)
+
+  include(GNUInstallDirs)
+  include(CMakePackageConfigHelpers)
+
+  install(
+    TARGETS rol
+    EXPORT ROLTargets
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  )
+
+  # Generated config header
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ROL_config.h"
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+  # Collect ROL public headers (flat include style)
+  file(GLOB_RECURSE ROL_PUBLIC_HEADERS CONFIGURE_DEPENDS
+    "${SRC}/**/ROL_*.hpp"
+    "${SRC}/**/ROL_*.h"
+    "${SRC}/**/ROL_*.H"
+  )
+
+  # Install them FLATTENED into <prefix>/include
+  foreach(hdr IN LISTS ROL_PUBLIC_HEADERS)
+    install(FILES "${hdr}" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  endforeach()
 
   option(ENABLE_TESTS OFF)
   option(ENABLE_EXAMPLES OFF)
@@ -118,6 +155,35 @@ if( STANDALONE_ROL )
   if(ENABLE_EXAMPLES)
     add_subdirectory(example)
   endif()
+
+  set(ROL_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/ROL")
+
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ROLConfig.cmake.in"
+  "@PACKAGE_INIT@\ninclude(\"\${CMAKE_CURRENT_LIST_DIR}/ROLTargets.cmake\")\n"
+  )
+
+  configure_package_config_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/ROLConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/ROLConfig.cmake"
+    INSTALL_DESTINATION "${ROL_INSTALL_CMAKEDIR}"
+  )
+
+  write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/ROLConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+  )
+
+  install(EXPORT ROLTargets
+    NAMESPACE ROL::
+    DESTINATION "${ROL_INSTALL_CMAKEDIR}"
+  )
+
+  install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/ROLConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/ROLConfigVersion.cmake"
+    DESTINATION "${ROL_INSTALL_CMAKEDIR}"
+  ) 
 
 else() # Build with Trilinos
   include(cmake/TrilinosROL.cmake)
